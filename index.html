@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>WebXR AR Card Menu - Interactive 3D Cards</title>
+  <title>WebXR AR Card Menu</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -35,105 +35,73 @@
       box-shadow: 0 6px 12px rgba(0,0,0,0.3);
     }
     #status {
-      position: fixed;
-      bottom: 40px;
-      left: 50%;
-      transform: translateX(-50%);
+      margin-top: 15px;
+      font-size: 16px;
       background: rgba(0, 0, 0, 0.5);
       color: white;
-      padding: 12px 20px;
-      border-radius: 24px;
-      font-size: 16px;
-      font-weight: 500;
-      margin: 0;
+      padding: 10px 15px;
+      border-radius: 12px;
+      display: none;
       backdrop-filter: blur(5px);
       box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-      max-width: 80%;
-      text-align: center;
-      display: none;
-      z-index: 1000;
-    }
-    .exit-ar {
-      position: fixed;
-      top: 20px;
-      right: 20px;
-      background: rgba(255, 255, 255, 0.25);
-      color: white;
-      border: none;
-      border-radius: 50%;
-      width: 50px;
-      height: 50px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 24px;
-      cursor: pointer;
-      backdrop-filter: blur(5px);
-      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-      z-index: 1000;
-      display: none;
-    }
-    .xr-active .exit-ar {
-      display: flex;
     }
   </style>
 </head>
 <body>
   <div id="overlay">
-    <button id="start-button">Enter AR Card Menu</button>
+    <button id="start-button">Start AR Card Menu</button>
+    <div id="status"></div>
   </div>
-  
-  <button class="exit-ar" id="exit-ar">×</button>
-  <div id="status"></div>
   
   <script type="module">
     import * as THREE from 'https://unpkg.com/three@0.150.1/build/three.module.js';
-    import { TextGeometry } from 'https://unpkg.com/three@0.150.1/examples/jsm/geometries/TextGeometry.js';
-    import { FontLoader } from 'https://unpkg.com/three@0.150.1/examples/jsm/loaders/FontLoader.js';
+    import { ARButton } from 'https://unpkg.com/three@0.150.1/examples/jsm/webxr/ARButton.js';
+    // We'll add these imports only if the basic AR session works first
+// import { TextGeometry } from 'https://unpkg.com/three@0.150.1/examples/jsm/geometries/TextGeometry.js';
+// import { FontLoader } from 'https://unpkg.com/three@0.150.1/examples/jsm/loaders/FontLoader.js';
 
-    // Variables for XR
     let camera, scene, renderer;
-    let controllers = [];
-    let xrSession = null;
+    let controller;
     let cards = [];
-    let font;
-    let raycaster;
+    let cardTextures = [];
     let hoveredCard = null;
-    let cardData = [
+    let clock = new THREE.Clock();
+    let font;
+    
+    // Card content data
+    const cardData = [
       {
-        title: "Nature Escape",
-        description: "Immerse yourself in stunning landscapes and natural wonders from around the world.",
-        color: 0x4ade80,
-        position: new THREE.Vector3(-0.2, 0, -0.5)
+        title: "Explore",
+        description: "Discover new worlds",
+        color: 0x4876FF,
+        pattern: "wavy"
       },
       {
-        title: "3D Design Studio",
-        description: "Create amazing 3D designs with powerful intuitive tools in augmented reality.",
-        color: 0x60a5fa,
-        position: new THREE.Vector3(0.2, 0, -0.5)
+        title: "Create",
+        description: "Build your ideas",
+        color: 0xFF4500,
+        pattern: "dotted"
       },
       {
-        title: "AR Games",
-        description: "Experience next-generation gaming with our collection of AR-powered interactive games.",
-        color: 0xf472b6,
-        position: new THREE.Vector3(-0.2, -0.22, -0.5)
+        title: "Learn",
+        description: "Expand your mind",
+        color: 0x00C957,
+        pattern: "linear"
       },
       {
-        title: "Virtual Gallery",
-        description: "Explore curated art exhibitions and immersive installations in your own space.",
-        color: 0xfbbf24,
-        position: new THREE.Vector3(0.2, -0.22, -0.5)
+        title: "Connect",
+        description: "Share with others",
+        color: 0xE066FF,
+        pattern: "circular"
       }
     ];
+    
+    init();
 
-    // Initialize WebXR components
     function init() {
       // Scene setup
       scene = new THREE.Scene();
       camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
-      
-      // Raycaster for interaction
-      raycaster = new THREE.Raycaster();
 
       // Renderer setup
       renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -144,454 +112,316 @@
       document.body.appendChild(renderer.domElement);
 
       // Lighting
-      const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+      const ambientLight = new THREE.AmbientLight(0x404040, 2);
       scene.add(ambientLight);
 
-      const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
       directionalLight.position.set(1, 1, 1);
       directionalLight.castShadow = true;
       scene.add(directionalLight);
 
-      // Handle window resize
-      window.addEventListener('resize', onWindowResize);
+      // Temporarily commenting out font loading to simplify initial setup
+      // const fontLoader = new FontLoader();
+      // fontLoader.load('https://unpkg.com/three@0.150.1/examples/fonts/helvetiker_regular.typeface.json', function(loadedFont) {
+      //   font = loadedFont;
+      // });
 
-      // Set up event listeners
-      document.getElementById('start-button').addEventListener('click', startARSession);
-      document.getElementById('exit-ar').addEventListener('click', endARSession);
-      
-      // Load font for text
-      const fontLoader = new FontLoader();
-      fontLoader.load('https://unpkg.com/three@0.150.1/examples/fonts/helvetiker_regular.typeface.json', (loadedFont) => {
-        font = loadedFont;
-      });
-    }
-
-    // Start AR session
-    function startARSession() {
-      if (!navigator.xr) {
-        updateStatus('WebXR is not supported in this browser.');
-        return;
-      }
-      
-      navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
-        if (supported) {
-          const sessionInit = { 
-            requiredFeatures: ['hit-test'],
-            optionalFeatures: ['dom-overlay', 'hand-tracking'], 
-            domOverlay: { root: document.body } 
-          };
-          
-          navigator.xr.requestSession('immersive-ar', sessionInit).then(onSessionStarted);
+      // Start button event
+      document.getElementById('start-button').addEventListener('click', () => {
+        // Use the exact same session initialization approach as the working code
+        if (navigator.xr) {
+          navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+            if (supported) {
+              const sessionInit = { 
+                requiredFeatures: ['hit-test'],
+                optionalFeatures: ['dom-overlay'], 
+                domOverlay: { root: document.body } 
+              };
+              navigator.xr.requestSession('immersive-ar', sessionInit).then(onSessionStarted);
+              
+              // Make sure we're properly updating the status
+              updateStatus('Starting AR session...');
+            } else {
+              updateStatus('WebXR AR session is not supported on this device.');
+            }
+          });
         } else {
-          updateStatus('WebXR AR session is not supported on this device.');
+          updateStatus('WebXR is not supported in this browser.');
         }
       });
+
+      // Handle window resize
+      window.addEventListener('resize', onWindowResize);
     }
 
-    // Handle AR session start
+    function updateStatus(message) {
+      const statusElement = document.getElementById('status');
+      statusElement.style.display = 'block';
+      statusElement.textContent = message;
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
     function onSessionStarted(session) {
-      xrSession = session;
-      
-      // Hide start button
-      document.getElementById('start-button').style.display = 'none';
-      
-      // Set up XR scene
+      // Set up XR session in the exact same way as the working code
       renderer.xr.setReferenceSpaceType('local');
       renderer.xr.setSession(session);
       
-      // Add XR active class to body
-      document.body.classList.add('xr-active');
+      // Hide button and show status
+      document.getElementById('start-button').style.display = 'none';
+      updateStatus('AR card menu initializing...');
+
+      // Create procedural textures first
+      createProceduralTextures();
       
-      // Set up controllers
-      setupControllers(session);
+      // Create the cards
+      createCards();
       
-      // Create card menu
-      createCardMenu();
-      
-      // Start animation loop
+      // Set up controller
+      setupController(session);
+
+      // Start animation loop - this is critical for WebXR
       renderer.setAnimationLoop(render);
-      
+
       // Handle session end
       session.addEventListener('end', onSessionEnd);
-      
-      updateStatus('Welcome to AR Card Menu! Point at cards to interact.');
-    }
-    
-    // End AR session
-    function endARSession() {
-      if (xrSession) {
-        xrSession.end();
-      }
-    }
-    
-    function onSessionEnd() {
-      // Remove XR active class from body
-      document.body.classList.remove('xr-active');
-      
-      // Show start button again
-      document.getElementById('start-button').style.display = 'block';
-      
-      // Clear status
-      document.getElementById('status').style.display = 'none';
-      
-      // Reset state
-      cards = [];
-      controllers = [];
-      
-      // Stop animation loop
-      renderer.setAnimationLoop(null);
-      xrSession = null;
-      
-      // Clear scene
-      clearScene();
-    }
-    
-    function clearScene() {
-      // Remove all objects from scene
-      while(scene.children.length > 0) { 
-        const object = scene.children[0];
-        if (object.geometry) object.geometry.dispose();
-        if (object.material) object.material.dispose();
-        scene.remove(object); 
-      }
     }
 
-    function setupControllers(session) {
-      // Set up controllers
-      for (let i = 0; i < 2; i++) {
-        const controller = renderer.xr.getController(i);
-        controller.userData.id = i;
-        scene.add(controller);
-        
-        // Add visual ray indicator
-        const rayGeometry = new THREE.BufferGeometry().setFromPoints([
-          new THREE.Vector3(0, 0, 0),
-          new THREE.Vector3(0, 0, -5)
-        ]);
-        
-        const rayMaterial = new THREE.LineBasicMaterial({
-          color: i === 0 ? 0x6699ff : 0xff6666,
-          opacity: 0.7,
-          transparent: true,
-          linewidth: 2
-        });
-        
-        const ray = new THREE.Line(rayGeometry, rayMaterial);
-        ray.name = 'ray';
-        ray.scale.z = 5;
-        controller.add(ray);
-        
-        // Add controller mesh
-        const handGeometry = new THREE.SphereGeometry(0.015, 16, 16);
-        const handMaterial = new THREE.MeshStandardMaterial({
-          color: i === 0 ? 0x6699ff : 0xff6666,
-          roughness: 0.3,
-          metalness: 0.5,
-          transparent: true,
-          opacity: 0.7
-        });
-        const handMesh = new THREE.Mesh(handGeometry, handMaterial);
-        controller.add(handMesh);
-        
-        controllers.push(controller);
-      }
+    function onSessionEnd() {
+      updateStatus('AR session ended');
+      document.getElementById('start-button').style.display = 'block';
     }
-    
-    function createCardMenu() {
-      // Check if font is loaded
-      if (!font) {
-        // Try again in 100ms
-        setTimeout(createCardMenu, 100);
-        return;
-      }
-      
-      // Calculate position in front of the user
-      const cameraOffset = new THREE.Vector3(0, 0, -0.7);
-      cameraOffset.applyQuaternion(camera.quaternion);
-      const menuPosition = camera.position.clone().add(cameraOffset);
-      
-      // Create a group for the menu
-      const menuGroup = new THREE.Group();
-      menuGroup.position.copy(menuPosition);
-      menuGroup.quaternion.copy(camera.quaternion);
-      scene.add(menuGroup);
-      
-      // Create cards
+
+    function createProceduralTextures() {
+      // Create simple colored textures for now to reduce complexity
       cardData.forEach((data, index) => {
-        const card = createCard(data);
+        const textureSize = 256;
+        const canvas = document.createElement('canvas');
+        canvas.width = textureSize;
+        canvas.height = textureSize;
+        const ctx = canvas.getContext('2d');
+        
+        // Simple solid color background for now
+        const color = new THREE.Color(data.color);
+        const r = Math.floor(color.r * 255);
+        const g = Math.floor(color.g * 255);
+        const b = Math.floor(color.b * 255);
+        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        ctx.fillRect(0, 0, textureSize, textureSize);
+        
+        // Create texture from canvas
+        const texture = new THREE.CanvasTexture(canvas);
+        cardTextures[index] = texture;
+      });
+      
+      // Log success message for debugging
+      console.log("Textures created successfully");
+    }
+
+    function createCards() {
+      const cardWidth = 0.2;
+      const cardHeight = 0.3;
+      const cardDepth = 0.02;
+      
+      // Create cards in a semicircle in front of the camera
+      for(let i = 0; i < cardData.length; i++) {
+        // Card geometry
+        const geometry = new THREE.BoxGeometry(cardWidth, cardHeight, cardDepth);
+        
+        // Card material with procedural texture
+        const material = new THREE.MeshStandardMaterial({
+          map: cardTextures[i],
+          color: cardData[i].color,
+          metalness: 0.3,
+          roughness: 0.6,
+        });
+        
+        // Create card mesh
+        const card = new THREE.Mesh(geometry, material);
+        
+        // Position in semi-circle
+        const angle = (i - (cardData.length - 1) / 2) * 0.25;
+        const radius = 0.65;
+        card.position.x = Math.sin(angle) * radius;
+        card.position.y = 0;
+        card.position.z = -Math.cos(angle) * radius - 0.3;
+        
+        // Initially face the camera
+        card.lookAt(0, 0, 0);
+        
+        // Store original properties for animations
         card.userData = {
-          index: index,
-          title: data.title,
-          description: data.description,
           originalPosition: card.position.clone(),
-          originalScale: card.scale.clone(),
           originalRotation: card.rotation.clone(),
-          baseColor: data.color,
-          isHovered: false
+          originalScale: card.scale.clone(),
+          index: i,
+          hovered: false
         };
-        menuGroup.add(card);
+        
+        // Add to scene and cards array
+        scene.add(card);
         cards.push(card);
-      });
+        
+        // Temporarily commenting out text addition to simplify
+        // We'll focus on getting the cards working first
+        // if (font) {
+        //   addCardText(card, cardData[i]);
+        // } else {
+        //   setTimeout(() => {
+        //     if (font) addCardText(card, cardData[i]);
+        //   }, 1000);
+        // }
+      }
       
-      updateStatus('Hover over cards to interact with them.');
+      updateStatus('Move your controller near a card to interact');
     }
     
-    function createCard(data) {
-      // Create card group
-      const cardGroup = new THREE.Group();
-      cardGroup.position.copy(data.position);
+    // Temporarily commenting out text function to simplify initial setup
+    // function addCardText(card, data) {
+    //   // Title text
+    //   const titleGeometry = new TextGeometry(data.title, {
+    //     font: font,
+    //     size: 0.03,
+    //     height: 0.005
+    //   });
+    //   titleGeometry.computeBoundingBox();
+    //   const titleWidth = titleGeometry.boundingBox.max.x - titleGeometry.boundingBox.min.x;
       
-      // Card dimensions
-      const width = 0.18;
-      const height = 0.12;
-      const depth = 0.01;
+    //   const titleMaterial = new THREE.MeshStandardMaterial({ color: 0xFFFFFF });
+    //   const titleMesh = new THREE.Mesh(titleGeometry, titleMaterial);
       
-      // Create card base with rounded corners
-      const shape = new THREE.Shape();
-      const radius = 0.02;
+    //   // Center and position the title on top of the card
+    //   titleMesh.position.set(-titleWidth/2, 0.08, 0.011);
+    //   card.add(titleMesh);
       
-      shape.moveTo(-width/2 + radius, -height/2);
-      shape.lineTo(width/2 - radius, -height/2);
-      shape.quadraticCurveTo(width/2, -height/2, width/2, -height/2 + radius);
-      shape.lineTo(width/2, height/2 - radius);
-      shape.quadraticCurveTo(width/2, height/2, width/2 - radius, height/2);
-      shape.lineTo(-width/2 + radius, height/2);
-      shape.quadraticCurveTo(-width/2, height/2, -width/2, height/2 - radius);
-      shape.lineTo(-width/2, -height/2 + radius);
-      shape.quadraticCurveTo(-width/2, -height/2, -width/2 + radius, -height/2);
+    //   // Description text
+    //   const descGeometry = new TextGeometry(data.description, {
+    //     font: font,
+    //     size: 0.015,
+    //     height: 0.002
+    //   });
+    //   descGeometry.computeBoundingBox();
+    //   const descWidth = descGeometry.boundingBox.max.x - descGeometry.boundingBox.min.x;
       
-      const extrudeSettings = {
-        steps: 1,
-        depth: depth,
-        bevelEnabled: true,
-        bevelThickness: 0.005,
-        bevelSize: 0.005,
-        bevelSegments: 3
-      };
+    //   const descMaterial = new THREE.MeshStandardMaterial({ color: 0xFFFFFF });
+    //   const descMesh = new THREE.Mesh(descGeometry, descMaterial);
       
-      const geometry = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+    //   // Center and position the description below the title
+    //   descMesh.position.set(-descWidth/2, 0.04, 0.011);
+    //   card.add(descMesh);
+    // }
+
+    function setupController(session) {
+      // Create controller
+      controller = renderer.xr.getController(0);
+      controller.addEventListener('connected', (event) => {
+        const xrInputSource = event.data;
+        updateStatus(`Controller connected: ${xrInputSource.handedness}`);
+      });
       
-      // Create gradient material
-      const cardMaterial = new THREE.MeshPhysicalMaterial({
-        color: data.color,
-        metalness: 0.2,
+      scene.add(controller);
+      
+      // Add a visual for the controller
+      const controllerGeometry = new THREE.CylinderGeometry(0.01, 0.02, 0.08, 16);
+      const controllerMaterial = new THREE.MeshStandardMaterial({
+        color: 0xFFFFFF,
         roughness: 0.3,
-        reflectivity: 0.5,
-        clearcoat: 0.8,
-        clearcoatRoughness: 0.2,
-        side: THREE.DoubleSide
+        metalness: 0.5
       });
-      
-      const cardMesh = new THREE.Mesh(geometry, cardMaterial);
-      cardMesh.castShadow = true;
-      cardMesh.receiveShadow = true;
-      cardGroup.add(cardMesh);
-      
-      // Add title text
-      const titleGeometry = new TextGeometry(data.title, {
-        font: font,
-        size: 0.015,
-        height: 0.002
-      });
-      
-      titleGeometry.computeBoundingBox();
-      const titleWidth = titleGeometry.boundingBox.max.x - titleGeometry.boundingBox.min.x;
-      
-      const titleMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
-      const titleMesh = new THREE.Mesh(titleGeometry, titleMaterial);
-      titleMesh.position.set(-titleWidth/2, 0.02, depth + 0.002);
-      cardGroup.add(titleMesh);
-      
-      // Add description text
-      const truncatedDesc = truncateText(data.description, 45);
-      const descGeometry = new TextGeometry(truncatedDesc, {
-        font: font,
-        size: 0.008,
-        height: 0.001
-      });
-      
-      descGeometry.computeBoundingBox();
-      const descWidth = descGeometry.boundingBox.max.x - descGeometry.boundingBox.min.x;
-      
-      const descMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
-      const descMesh = new THREE.Mesh(descGeometry, descMaterial);
-      descMesh.position.set(-descWidth/2, -0.02, depth + 0.002);
-      cardGroup.add(descMesh);
-      
-      return cardGroup;
+      const controllerMesh = new THREE.Mesh(controllerGeometry, controllerMaterial);
+      controllerMesh.rotation.x = Math.PI / 2;
+      controller.add(controllerMesh);
     }
-    
-    function truncateText(text, maxLength) {
-      if (text.length <= maxLength) return text;
-      return text.substring(0, maxLength - 3) + '...';
-    }
-    
-    function updateCardHoverState(card, isHovered) {
-      // Skip if state hasn't changed
-      if (card.userData.isHovered === isHovered) return;
-      
-      // Update state
-      card.userData.isHovered = isHovered;
-      
-      if (isHovered) {
-        // Store previous hovered card if there was one
-        if (hoveredCard && hoveredCard !== card) {
-          updateCardHoverState(hoveredCard, false);
-        }
-        
-        hoveredCard = card;
-        
-        // Animate to hovered state
-        const targetScale = card.userData.originalScale.clone().multiplyScalar(1.2);
-        const targetPosition = card.userData.originalPosition.clone().add(new THREE.Vector3(0, 0, 0.05));
-        
-        // Use TWEEN if available, or animate directly
-        card.scale.copy(targetScale);
-        card.position.copy(targetPosition);
-        
-        // Make card material more vibrant
-        card.children.forEach(child => {
-          if (child.material && child.material.color) {
-            if (child.material.userData.originalColor === undefined) {
-              child.material.userData.originalColor = child.material.color.clone();
-            }
-            
-            if (child === card.children[0]) {
-              // Main card body - enhance color
-              child.material.emissive = new THREE.Color(card.userData.baseColor);
-              child.material.emissiveIntensity = 0.3;
-              child.material.clearcoat = 1.0;
-            } else {
-              // Text - make brighter
-              child.material.emissive = new THREE.Color(0xffffff);
-              child.material.emissiveIntensity = 0.5;
-            }
-          }
-        });
-        
-        updateStatus(`${card.userData.title}: ${card.userData.description}`);
-      } else {
-        // Reset to original state
-        card.scale.copy(card.userData.originalScale);
-        card.position.copy(card.userData.originalPosition);
-        card.rotation.copy(card.userData.originalRotation);
-        
-        // Reset material
-        card.children.forEach(child => {
-          if (child.material) {
-            child.material.emissive = new THREE.Color(0x000000);
-            child.material.emissiveIntensity = 0;
-            
-            if (child === card.children[0]) {
-              child.material.clearcoat = 0.8;
-            }
-          }
-        });
-        
-        if (hoveredCard === card) {
-          hoveredCard = null;
-          updateStatus('Hover over cards to interact with them.');
-        }
-      }
-    }
-    
-    function updateDynamicRotation(card, controllerPosition) {
-      if (!card.userData.isHovered) return;
-      
-      // Calculate angle between controller and card
-      const cardWorldPos = new THREE.Vector3();
-      card.getWorldPosition(cardWorldPos);
-      
-      const cardToController = new THREE.Vector3().subVectors(controllerPosition, cardWorldPos);
-      cardToController.y = 0; // Ignore height difference for rotation
-      cardToController.normalize();
-      
-      // Create subtle tilting effect based on controller position
-      const tiltX = Math.max(-0.2, Math.min(0.2, -cardToController.z * 0.5));
-      const tiltZ = Math.max(-0.2, Math.min(0.2, cardToController.x * 0.5));
-      
-      // Apply subtle rotation
-      card.rotation.x = card.userData.originalRotation.x + tiltX;
-      card.rotation.z = card.userData.originalRotation.z + tiltZ;
-    }
-    
+
     function render(timestamp, frame) {
-      // Process controller interactions
-      if (controllers.length > 0 && cards.length > 0) {
-        controllers.forEach(controller => {
-          if (!controller.visible) return;
+      if (frame) {
+        const referenceSpace = renderer.xr.getReferenceSpace();
+        const session = renderer.xr.getSession();
+        
+        // Check if controller is close to any card
+        const controllerWorldPosition = new THREE.Vector3();
+        controller.getWorldPosition(controllerWorldPosition);
+        
+        let closestCard = null;
+        let closestDistance = 0.3; // Max distance for hover effect
+        
+        // Reset all previously hovered cards
+        cards.forEach(card => {
+          if (card.userData.hovered) {
+            animateToOriginal(card);
+          }
+        });
+        
+        // Find the closest card to the controller
+        cards.forEach(card => {
+          const distance = controllerWorldPosition.distanceTo(card.position);
           
-          // Get controller position and direction
-          const tempMatrix = new THREE.Matrix4();
-          tempMatrix.identity().extractRotation(controller.matrixWorld);
-          
-          const raycasterOrigin = new THREE.Vector3();
-          controller.getWorldPosition(raycasterOrigin);
-          
-          const raycasterDirection = new THREE.Vector3(0, 0, -1);
-          raycasterDirection.applyMatrix4(tempMatrix);
-          
-          // Update raycaster
-          raycaster.set(raycasterOrigin, raycasterDirection);
-          
-          // Check for intersections with cards
-          const intersects = raycaster.intersectObjects(cards, true);
-          
-          if (intersects.length > 0) {
-            // Find the parent card
-            let parentCard = intersects[0].object;
-            while (parentCard.parent && cards.indexOf(parentCard) === -1) {
-              parentCard = parentCard.parent;
-            }
-            
-            if (cards.includes(parentCard)) {
-              // Update hover state
-              updateCardHoverState(parentCard, true);
-              
-              // Update dynamic rotation
-              updateDynamicRotation(parentCard, raycasterOrigin);
-            }
+          if (distance < closestDistance) {
+            closestCard = card;
+            closestDistance = distance;
+          }
+        });
+        
+        // Apply hover effect to the closest card
+        if (closestCard) {
+          hoverCard(closestCard, controllerWorldPosition);
+        }
+        
+        // Subtle card animations (gentle floating)
+        const time = clock.getElapsedTime();
+        cards.forEach((card, index) => {
+          if (!card.userData.hovered) {
+            card.position.y = card.userData.originalPosition.y + Math.sin(time * 0.5 + index) * 0.01;
+            card.rotation.y = card.userData.originalRotation.y + Math.sin(time * 0.3 + index) * 0.05;
           }
         });
       }
-      
-      // Animate cards
-      cards.forEach((card, index) => {
-        if (!card.userData.isHovered) {
-          // Subtle floating animation for non-hovered cards
-          card.position.y = card.userData.originalPosition.y + 
-            Math.sin((timestamp / 1000) + index * 1.5) * 0.005;
-        }
-      });
       
       renderer.render(scene, camera);
     }
     
-    function onWindowResize() {
-      if (camera) {
-        camera.aspect = window.innerWidth / window.innerHeight;
-        camera.updateProjectionMatrix();
-      }
-      if (renderer) {
-        renderer.setSize(window.innerWidth, window.innerHeight);
-      }
-    }
-    
-    function updateStatus(message) {
-      const statusElement = document.getElementById('status');
-      statusElement.textContent = message;
-      statusElement.style.display = 'block';
+    function hoverCard(card, controllerPosition) {
+      card.userData.hovered = true;
       
-      // Auto-hide after 5 seconds for non-error messages
-      if (!message.includes('error') && !message.includes('not supported')) {
-        setTimeout(() => {
-          statusElement.style.display = 'none';
-        }, 5000);
-      }
+      // Scale up the card
+      card.scale.set(1.15, 1.15, 1.15);
+      
+      // Move card slightly toward the user
+      const direction = new THREE.Vector3().subVectors(
+        new THREE.Vector3(0, 0, 0), 
+        card.userData.originalPosition
+      ).normalize().multiplyScalar(0.05);
+      
+      card.position.copy(card.userData.originalPosition).add(direction);
+      
+      // Make card face toward controller with slight rotation
+      const lookAtPos = controllerPosition.clone();
+      card.lookAt(lookAtPos);
+      
+      // Enhance material emission for glow effect
+      card.material.emissive.setHex(cardData[card.userData.index].color);
+      card.material.emissiveIntensity = 0.3;
     }
     
-    // Initialize everything
-    document.addEventListener('DOMContentLoaded', init);
+    function animateToOriginal(card) {
+      card.userData.hovered = false;
+      
+      // Reset scale
+      card.scale.copy(card.userData.originalScale);
+      
+      // Reset position
+      card.position.copy(card.userData.originalPosition);
+      
+      // Reset rotation
+      card.rotation.copy(card.userData.originalRotation);
+      
+      // Reset material
+      card.material.emissiveIntensity = 0;
+    }
   </script>
 </body>
 </html>
