@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>WebXR AR Interactive Card Menu</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <style>
+    body { 
+      margin: 0; 
+      overflow: hidden;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    #overlay {
+      position: absolute;
+      top: 20px;
+      left: 20px;
+      z-index: 1;
+    }
+    #start-button {
+      padding: 12px 24px;
+      font-size: 18px;
+      background: rgba(72, 118, 255, 0.8);
+      color: white;
+      border: none;
+      border-radius: 30px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+      cursor: pointer;
+      transition: all 0.3s ease;
+    }
+    #start-button:hover {
+      background: rgba(72, 118, 255, 1);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(0,0,0,0.3);
+    }
+    #status {
+      margin-top: 15px;
+      font-size: 16px;
+      background: rgba(0, 0, 0, 0.5);
+      color: white;
+      padding: 10px 15px;
+      border-radius: 12px;
+      display: none;
+      backdrop-filter: blur(5px);
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+  </style>
+</head>
+<body>
+  <div id="overlay">
+    <button id="start-button">Start AR Experience</button>
+    <div id="status"></div>
+  </div>
+  
+  <script type="module">
+    import * as THREE from 'https://unpkg.com/three@0.150.1/build/three.module.js';
+    import { ARButton } from 'https://unpkg.com/three@0.150.1/examples/jsm/webxr/ARButton.js';
+    import { TextGeometry } from 'https://unpkg.com/three@0.150.1/examples/jsm/geometries/TextGeometry.js';
+    import { FontLoader } from 'https://unpkg.com/three@0.150.1/examples/jsm/loaders/FontLoader.js';
+
+    let camera, scene, renderer;
+    let controller, hand;
+    let cards = [];
+    let handSphere; // Visual representation of hand position
+    let fontPromise; // Promise for loading the font
+    let clock = new THREE.Clock();
+    
+    // Card data
+    const cardData = [
+      {
+        title: "Explore",
+        description: "Discover new AR worlds",
+        color: 0x4876FF,
+        pattern: "wavy"
+      },
+      {
+        title: "Create",
+        description: "Build your own AR experiences",
+        color: 0xFF4500,
+        pattern: "dotted"
+      },
+      {
+        title: "Share",
+        description: "Connect with others in AR",
+        color: 0x00CC88,
+        pattern: "linear"
+      },
+      {
+        title: "Play",
+        description: "Games and fun in augmented reality",
+        color: 0xFFAA00,
+        pattern: "circular"
+      }
+    ];
+    
+    init();
+
+    function init() {
+      // Scene setup
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+
+      // Renderer setup
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.xr.enabled = true;
+      renderer.setClearColor(0x000000, 0);
+      renderer.shadowMap.enabled = true;
+      document.body.appendChild(renderer.domElement);
+
+      // Lighting
+      const ambientLight = new THREE.AmbientLight(0x404040, 2);
+      scene.add(ambientLight);
+
+      const directionalLight = new THREE.DirectionalLight(0xffffff, 1.5);
+      directionalLight.position.set(1, 1, 1);
+      directionalLight.castShadow = true;
+      scene.add(directionalLight);
+
+      // Add some point lights for dynamic lighting effects
+      const pointLight1 = new THREE.PointLight(0x6699FF, 1, 1);
+      pointLight1.position.set(-0.2, 0.2, 0.5);
+      scene.add(pointLight1);
+      
+      const pointLight2 = new THREE.PointLight(0xFF9966, 1, 1);
+      pointLight2.position.set(0.2, -0.2, 0.5);
+      scene.add(pointLight2);
+
+      // Preload font
+      const fontLoader = new FontLoader();
+      fontPromise = new Promise((resolve) => {
+        fontLoader.load('https://unpkg.com/three@0.150.1/examples/fonts/helvetiker_regular.typeface.json', (font) => {
+          resolve(font);
+        });
+      });
+
+      // Start button event
+      document.getElementById('start-button').addEventListener('click', () => {
+        if (navigator.xr) {
+          navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
+            if (supported) {
+              const sessionInit = { 
+                requiredFeatures: ['hit-test', 'hand-tracking'],
+                optionalFeatures: ['dom-overlay'], 
+                domOverlay: { root: document.body } 
+              };
+              navigator.xr.requestSession('immersive-ar', sessionInit).then(onSessionStarted);
+            } else {
+              updateStatus('WebXR AR session or hand tracking is not supported on this device.');
+            }
+          });
+        } else {
+          updateStatus('WebXR is not supported in this browser.');
+        }
+      });
+
+      // Handle window resize
+      window.addEventListener('resize', onWindowResize);
+    }
+
+    function updateStatus(message) {
+      const statusElement = document.getElementById('status');
+      statusElement.style.display = 'block';
+      statusElement.textContent = message;
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function onSessionStarted(session) {
+      // Set up XR session
+      renderer.xr.setReferenceSpaceType('local');
+      renderer.xr.setSession(session);
+      
+      // Hide button and show status
+      document.getElementById('start-button').style.display = 'none';
+      updateStatus('AR session started. Looking for your hands...');
+
+      // Create the interactive cards
+      createCards();
+      
+      // Set up hand tracking
+      setupHandTracking(session);
+
+      // Start animation loop
+      renderer.setAnimationLoop(render);
+
+      // Handle session end
+      session.addEventListener('end', onSessionEnd);
+    }
+
+    function onSessionEnd() {
+      updateStatus('AR session ended');
+      document.getElementById('start-button').style.display = 'block';
+    }
+
+    // Create a procedural texture based on the pattern type
+    function createProceduralTexture(pattern, color) {
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 256;
+      const context = canvas.getContext('2d');
+      
+      // Fill background with a lighter version of the color
+      const r = (color >> 16) & 255;
+      const g = (color >> 8) & 255;
+      const b = color & 255;
+      context.fillStyle = `rgb(${Math.min(r+30, 255)}, ${Math.min(g+30, 255)}, ${Math.min(b+30, 255)})`;
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      
+      // Set pattern color
+      context.fillStyle = `rgb(${r}, ${g}, ${b})`;
+      context.strokeStyle = `rgb(${r}, ${g}, ${b})`;
+      context.lineWidth = 3;
+      
+      switch(pattern) {
+        case "wavy":
+          // Draw wavy lines
+          for(let y = 10; y < canvas.height; y += 30) {
+            context.beginPath();
+            for(let x = 0; x < canvas.width; x += 5) {
+              const amp = 10;
+              const freq = 0.05;
+              context.lineTo(x, y + Math.sin(x * freq) * amp);
+            }
+            context.stroke();
+          }
+          break;
+          
+        case "dotted":
+          // Draw dots
+          for(let y = 15; y < canvas.height; y += 30) {
+            for(let x = 15; x < canvas.width; x += 30) {
+              context.beginPath();
+              context.arc(x, y, 5, 0, Math.PI * 2);
+              context.fill();
+            }
+          }
+          break;
+          
+        case "linear":
+          // Draw linear gradient lines
+          for(let y = 0; y < canvas.height; y += 20) {
+            context.fillRect(0, y, canvas.width, 5);
+          }
+          break;
+          
+        case "circular":
+          // Draw concentric circles
+          for(let r = 10; r < 130; r += 20) {
+            context.beginPath();
+            context.arc(canvas.width/2, canvas.height/2, r, 0, Math.PI * 2);
+            context.stroke();
+          }
+          break;
+      }
+      
+      return new THREE.CanvasTexture(canvas);
+    }
+
+    async function createCardText(card, title, description) {
+      const font = await fontPromise;
+      
+      // Create title text
+      const titleGeometry = new TextGeometry(title, {
+        font: font,
+        size: 0.02,
+        height: 0.005
+      });
+      
+      const titleMaterial = new THREE.MeshStandardMaterial({ color: 0xFFFFFF });
+      const titleMesh = new THREE.Mesh(titleGeometry, titleMaterial);
+      
+      // Center the text on the card
+      titleGeometry.computeBoundingBox();
+      const titleWidth = titleGeometry.boundingBox.max.x - titleGeometry.boundingBox.min.x;
+      titleMesh.position.set(-titleWidth/2, 0.05, 0.02);
+      
+      // Create description text
+      const descGeometry = new TextGeometry(description, {
+        font: font,
+        size: 0.01,
+        height: 0.002
+      });
+      
+      const descMaterial = new THREE.MeshStandardMaterial({ color: 0xFFFFFF });
+      const descMesh = new THREE.Mesh(descGeometry, descMaterial);
+      
+      // Center the text on the card
+      descGeometry.computeBoundingBox();
+      const descWidth = descGeometry.boundingBox.max.x - descGeometry.boundingBox.min.x;
+      descMesh.position.set(-descWidth/2, -0.03, 0.02);
+      
+      // Add text to card
+      card.add(titleMesh);
+      card.add(descMesh);
+    }
+
+    async function createCards() {
+      // Create four interactive cards
+      for(let i = 0; i < cardData.length; i++) {
+        const data = cardData[i];
+        
+        // Create card with procedural texture
+        const cardGeometry = new THREE.PlaneGeometry(0.15, 0.2, 8, 8);
+        const texture = createProceduralTexture(data.pattern, data.color);
+        
+        const cardMaterial = new THREE.MeshPhysicalMaterial({
+          color: data.color,
+          map: texture,
+          metalness: 0.3,
+          roughness: 0.4,
+          envMapIntensity: 0.5,
+          reflectivity: 0.5,
+          clearcoat: 0.5,
+        });
+        
+        const card = new THREE.Mesh(cardGeometry, cardMaterial);
+        
+        // Position cards in a horizontal arc in front of the user
+        const angle = Math.PI / 8 * (i - 1.5);
+        const radius = 0.4;
+        card.position.set(Math.sin(angle) * radius, 0, -Math.cos(angle) * radius - 0.1);
+        card.rotation.y = -angle;
+        
+        // Add text to the card
+        await createCardText(card, data.title, data.description);
+        
+        // Store original position and rotation for animations
+        card.userData = {
+          originalPosition: card.position.clone(),
+          originalRotation: card.rotation.clone(),
+          originalScale: card.scale.clone(),
+          color: data.color,
+          distance: Infinity,
+          hoverAnimation: 0,
+        };
+        
+        scene.add(card);
+        cards.push(card);
+      }
+      
+      updateStatus('Cards created! Move your hand near them to interact.');
+    }
+
+    function setupHandTracking(session) {
+      // Create a visual representation of the hand position
+      const sphereGeometry = new THREE.SphereGeometry(0.02, 32, 32);
+      const sphereMaterial = new THREE.MeshPhongMaterial({
+        color: 0xFFFFFF,
+        transparent: true,
+        opacity: 0.7
+      });
+      handSphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+      handSphere.visible = false;
+      scene.add(handSphere);
+      
+      // Create a controller object for hand tracking
+      const inputSource = new THREE.Group();
+      scene.add(inputSource);
+      
+      // Create hand object
+      hand = new THREE.Group();
+      scene.add(hand);
+    }
+
+    function updateHandPosition(frame, referenceSpace) {
+      // Check if hand tracking data is available
+      if (frame.getJointPose) {
+        const hands = frame.getHands ? frame.getHands() : [];
+        
+        // Use the first available hand
+        if (hands && hands.length > 0) {
+          const handData = hands[0];
+          const indexFingerTip = handData.joints['index-finger-tip'];
+          
+          if (indexFingerTip) {
+            const pose = frame.getJointPose(indexFingerTip, referenceSpace);
+            
+            if (pose) {
+              // Update hand visual position
+              hand.position.set(
+                pose.transform.position.x,
+                pose.transform.position.y,
+                pose.transform.position.z
+              );
+              
+              // Make the hand sphere visible now that we have tracking
+              handSphere.visible = true;
+              handSphere.position.copy(hand.position);
+              
+              // Check for interactions with cards
+              updateCardInteractions();
+              
+              return true;
+            }
+          }
+        }
+      }
+      
+      return false;
+    }
+
+    function updateCardInteractions() {
+      // Calculate distance from hand to each card
+      for (let i = 0; i < cards.length; i++) {
+        const card = cards[i];
+        const distance = hand.position.distanceTo(card.position);
+        card.userData.distance = distance;
+        
+        // Update hover animation progress
+        const targetHover = distance < 0.25 ? 1 : 0;
+        card.userData.hoverAnimation = THREE.MathUtils.lerp(
+          card.userData.hoverAnimation,
+          targetHover,
+          0.1
+        );
+        
+        // Apply hover effects
+        const hoverAmount = card.userData.hoverAnimation;
+        
+        // Scale effect
+        const scale = 1 + 0.3 * hoverAmount;
+        card.scale.set(scale, scale, scale);
+        
+        // Position effect - move toward user
+        const originalPos = card.userData.originalPosition;
+        const moveDir = new THREE.Vector3().subVectors(hand.position, originalPos).normalize();
+        
+        card.position.copy(originalPos).add(
+          moveDir.multiplyScalar(0.1 * hoverAmount)
+        );
+        
+        // Rotation effect - follow hand slightly
+        if (hoverAmount > 0.1) {
+          // Calculate direction from card to hand
+          const lookDir = new THREE.Vector3().subVectors(hand.position, card.position);
+          
+          // Apply rotation based on hand position, but keep it subtle
+          const originalRot = card.userData.originalRotation;
+          const maxRotation = 0.2; // Maximum rotation in radians
+          
+          card.rotation.y = originalRot.y + lookDir.x * maxRotation * hoverAmount;
+          card.rotation.x = originalRot.x - lookDir.y * maxRotation * hoverAmount;
+        } else {
+          // Return to original rotation
+          card.rotation.copy(card.userData.originalRotation);
+        }
+        
+        // Material effect - change emissive intensity
+        card.material.emissive.setHex(card.userData.color);
+        card.material.emissiveIntensity = 0.5 * hoverAmount;
+      }
+    }
+
+    function render(timestamp, frame) {
+      if (frame) {
+        const referenceSpace = renderer.xr.getReferenceSpace();
+        const session = renderer.xr.getSession();
+        
+        // Update hand position based on tracking
+        const handUpdated = updateHandPosition(frame, referenceSpace);
+        
+        if (!handUpdated) {
+          // If hand tracking is not available, animate the cards slightly
+          const time = clock.getElapsedTime();
+          cards.forEach((card, i) => {
+            card.position.y = card.userData.originalPosition.y + Math.sin(time * 1.5 + i) * 0.01;
+            card.rotation.y = card.userData.originalRotation.y + Math.sin(time * 0.5 + i) * 0.03;
+          });
+        }
+      }
+      
+      // Animate lights for atmosphere
+      const time = clock.getElapsedTime();
+      const lights = scene.children.filter(obj => obj instanceof THREE.PointLight);
+      lights.forEach((light, i) => {
+        light.intensity = 0.8 + Math.sin(time * 0.5 + i * Math.PI) * 0.2;
+      });
+      
+      renderer.render(scene, camera);
+    }
+  </script>
+</body>
+</html>
