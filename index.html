@@ -2,7 +2,7 @@
 <html>
 <head>
   <meta charset="utf-8">
-  <title>WebXR AR Interactive Card Menu</title>
+  <title>WebXR AR Card Menu</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -49,7 +49,7 @@
 </head>
 <body>
   <div id="overlay">
-    <button id="start-button">Start AR Experience</button>
+    <button id="start-button">Start AR Card Menu</button>
     <div id="status"></div>
   </div>
   
@@ -60,36 +60,37 @@
     import { FontLoader } from 'https://unpkg.com/three@0.150.1/examples/jsm/loaders/FontLoader.js';
 
     let camera, scene, renderer;
-    let controller, hand;
+    let controller;
     let cards = [];
-    let handSphere; // Visual representation of hand position
-    let fontPromise; // Promise for loading the font
+    let cardTextures = [];
+    let hoveredCard = null;
     let clock = new THREE.Clock();
+    let font;
     
-    // Card data
+    // Card content data
     const cardData = [
       {
         title: "Explore",
-        description: "Discover new AR worlds",
+        description: "Discover new worlds",
         color: 0x4876FF,
         pattern: "wavy"
       },
       {
         title: "Create",
-        description: "Build your own AR experiences",
+        description: "Build your ideas",
         color: 0xFF4500,
         pattern: "dotted"
       },
       {
-        title: "Share",
-        description: "Connect with others in AR",
-        color: 0x00CC88,
+        title: "Learn",
+        description: "Expand your mind",
+        color: 0x00C957,
         pattern: "linear"
       },
       {
-        title: "Play",
-        description: "Games and fun in augmented reality",
-        color: 0xFFAA00,
+        title: "Connect",
+        description: "Share with others",
+        color: 0xE066FF,
         pattern: "circular"
       }
     ];
@@ -118,21 +119,10 @@
       directionalLight.castShadow = true;
       scene.add(directionalLight);
 
-      // Add some point lights for dynamic lighting effects
-      const pointLight1 = new THREE.PointLight(0x6699FF, 1, 1);
-      pointLight1.position.set(-0.2, 0.2, 0.5);
-      scene.add(pointLight1);
-      
-      const pointLight2 = new THREE.PointLight(0xFF9966, 1, 1);
-      pointLight2.position.set(0.2, -0.2, 0.5);
-      scene.add(pointLight2);
-
-      // Preload font
+      // Load font for text
       const fontLoader = new FontLoader();
-      fontPromise = new Promise((resolve) => {
-        fontLoader.load('https://unpkg.com/three@0.150.1/examples/fonts/helvetiker_regular.typeface.json', (font) => {
-          resolve(font);
-        });
+      fontLoader.load('https://unpkg.com/three@0.150.1/examples/fonts/helvetiker_regular.typeface.json', function(loadedFont) {
+        font = loadedFont;
       });
 
       // Start button event
@@ -141,13 +131,13 @@
           navigator.xr.isSessionSupported('immersive-ar').then((supported) => {
             if (supported) {
               const sessionInit = { 
-                requiredFeatures: ['hit-test', 'hand-tracking'],
+                requiredFeatures: ['hit-test'],
                 optionalFeatures: ['dom-overlay'], 
                 domOverlay: { root: document.body } 
               };
               navigator.xr.requestSession('immersive-ar', sessionInit).then(onSessionStarted);
             } else {
-              updateStatus('WebXR AR session or hand tracking is not supported on this device.');
+              updateStatus('WebXR AR session is not supported on this device.');
             }
           });
         } else {
@@ -178,13 +168,16 @@
       
       // Hide button and show status
       document.getElementById('start-button').style.display = 'none';
-      updateStatus('AR session started. Looking for your hands...');
+      updateStatus('AR card menu initializing...');
 
-      // Create the interactive cards
+      // Create procedural textures first
+      createProceduralTextures();
+      
+      // Create the cards
       createCards();
       
-      // Set up hand tracking
-      setupHandTracking(session);
+      // Set up controller
+      setupController(session);
 
       // Start animation loop
       renderer.setAnimationLoop(render);
@@ -198,263 +191,199 @@
       document.getElementById('start-button').style.display = 'block';
     }
 
-    // Create a procedural texture based on the pattern type
-    function createProceduralTexture(pattern, color) {
-      const canvas = document.createElement('canvas');
-      canvas.width = 256;
-      canvas.height = 256;
-      const context = canvas.getContext('2d');
+    function createProceduralTextures() {
+      const textureSize = 256;
       
-      // Fill background with a lighter version of the color
-      const r = (color >> 16) & 255;
-      const g = (color >> 8) & 255;
-      const b = color & 255;
-      context.fillStyle = `rgb(${Math.min(r+30, 255)}, ${Math.min(g+30, 255)}, ${Math.min(b+30, 255)})`;
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      
-      // Set pattern color
-      context.fillStyle = `rgb(${r}, ${g}, ${b})`;
-      context.strokeStyle = `rgb(${r}, ${g}, ${b})`;
-      context.lineWidth = 3;
-      
-      switch(pattern) {
-        case "wavy":
-          // Draw wavy lines
-          for(let y = 10; y < canvas.height; y += 30) {
-            context.beginPath();
-            for(let x = 0; x < canvas.width; x += 5) {
-              const amp = 10;
-              const freq = 0.05;
-              context.lineTo(x, y + Math.sin(x * freq) * amp);
+      // Create canvas for each texture type
+      cardData.forEach((data, index) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = textureSize;
+        canvas.height = textureSize;
+        const ctx = canvas.getContext('2d');
+        
+        // Fill background with lighter version of the color
+        const color = new THREE.Color(data.color);
+        const r = Math.floor(color.r * 255);
+        const g = Math.floor(color.g * 255);
+        const b = Math.floor(color.b * 255);
+        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        ctx.fillRect(0, 0, textureSize, textureSize);
+        
+        // Add pattern based on type
+        const darkColor = `rgba(${Math.floor(r*0.7)}, ${Math.floor(g*0.7)}, ${Math.floor(b*0.7)}, 0.8)`;
+        ctx.fillStyle = darkColor;
+        ctx.strokeStyle = darkColor;
+        
+        switch(data.pattern) {
+          case "wavy":
+            // Draw wavy pattern
+            ctx.beginPath();
+            for(let y = 0; y < textureSize; y += 20) {
+              for(let x = 0; x < textureSize; x += 5) {
+                const amplitude = 8;
+                const frequency = 0.05;
+                const yOffset = Math.sin(x * frequency) * amplitude;
+                ctx.rect(x, y + yOffset, 3, 3);
+              }
             }
-            context.stroke();
-          }
-          break;
-          
-        case "dotted":
-          // Draw dots
-          for(let y = 15; y < canvas.height; y += 30) {
-            for(let x = 15; x < canvas.width; x += 30) {
-              context.beginPath();
-              context.arc(x, y, 5, 0, Math.PI * 2);
-              context.fill();
+            ctx.fill();
+            break;
+            
+          case "dotted":
+            // Draw dot pattern
+            for(let y = 10; y < textureSize; y += 20) {
+              for(let x = 10; x < textureSize; x += 20) {
+                ctx.beginPath();
+                ctx.arc(x, y, 4, 0, Math.PI * 2);
+                ctx.fill();
+              }
             }
-          }
-          break;
-          
-        case "linear":
-          // Draw linear gradient lines
-          for(let y = 0; y < canvas.height; y += 20) {
-            context.fillRect(0, y, canvas.width, 5);
-          }
-          break;
-          
-        case "circular":
-          // Draw concentric circles
-          for(let r = 10; r < 130; r += 20) {
-            context.beginPath();
-            context.arc(canvas.width/2, canvas.height/2, r, 0, Math.PI * 2);
-            context.stroke();
-          }
-          break;
-      }
-      
-      return new THREE.CanvasTexture(canvas);
+            break;
+            
+          case "linear":
+            // Draw linear pattern
+            for(let y = 10; y < textureSize; y += 25) {
+              ctx.beginPath();
+              ctx.lineWidth = 4;
+              ctx.moveTo(0, y);
+              ctx.lineTo(textureSize, y);
+              ctx.stroke();
+            }
+            break;
+            
+          case "circular":
+            // Draw circular pattern
+            const centerX = textureSize / 2;
+            const centerY = textureSize / 2;
+            for(let radius = 20; radius < textureSize; radius += 30) {
+              ctx.beginPath();
+              ctx.lineWidth = 3;
+              ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
+              ctx.stroke();
+            }
+            break;
+        }
+        
+        // Create texture from canvas
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        cardTextures[index] = texture;
+      });
     }
 
-    async function createCardText(card, title, description) {
-      const font = await fontPromise;
+    function createCards() {
+      const cardWidth = 0.2;
+      const cardHeight = 0.3;
+      const cardDepth = 0.02;
       
-      // Create title text
-      const titleGeometry = new TextGeometry(title, {
-        font: font,
-        size: 0.02,
-        height: 0.005
-      });
-      
-      const titleMaterial = new THREE.MeshStandardMaterial({ color: 0xFFFFFF });
-      const titleMesh = new THREE.Mesh(titleGeometry, titleMaterial);
-      
-      // Center the text on the card
-      titleGeometry.computeBoundingBox();
-      const titleWidth = titleGeometry.boundingBox.max.x - titleGeometry.boundingBox.min.x;
-      titleMesh.position.set(-titleWidth/2, 0.05, 0.02);
-      
-      // Create description text
-      const descGeometry = new TextGeometry(description, {
-        font: font,
-        size: 0.01,
-        height: 0.002
-      });
-      
-      const descMaterial = new THREE.MeshStandardMaterial({ color: 0xFFFFFF });
-      const descMesh = new THREE.Mesh(descGeometry, descMaterial);
-      
-      // Center the text on the card
-      descGeometry.computeBoundingBox();
-      const descWidth = descGeometry.boundingBox.max.x - descGeometry.boundingBox.min.x;
-      descMesh.position.set(-descWidth/2, -0.03, 0.02);
-      
-      // Add text to card
-      card.add(titleMesh);
-      card.add(descMesh);
-    }
-
-    async function createCards() {
-      // Create four interactive cards
+      // Create cards in a semicircle in front of the camera
       for(let i = 0; i < cardData.length; i++) {
-        const data = cardData[i];
+        // Card geometry
+        const geometry = new THREE.BoxGeometry(cardWidth, cardHeight, cardDepth);
         
-        // Create card with procedural texture
-        const cardGeometry = new THREE.PlaneGeometry(0.15, 0.2, 8, 8);
-        const texture = createProceduralTexture(data.pattern, data.color);
-        
-        const cardMaterial = new THREE.MeshPhysicalMaterial({
-          color: data.color,
-          map: texture,
+        // Card material with procedural texture
+        const material = new THREE.MeshStandardMaterial({
+          map: cardTextures[i],
+          color: cardData[i].color,
           metalness: 0.3,
-          roughness: 0.4,
-          envMapIntensity: 0.5,
-          reflectivity: 0.5,
-          clearcoat: 0.5,
+          roughness: 0.6,
         });
         
-        const card = new THREE.Mesh(cardGeometry, cardMaterial);
+        // Create card mesh
+        const card = new THREE.Mesh(geometry, material);
         
-        // Position cards in a horizontal arc in front of the user
-        const angle = Math.PI / 8 * (i - 1.5);
-        const radius = 0.4;
-        card.position.set(Math.sin(angle) * radius, 0, -Math.cos(angle) * radius - 0.1);
-        card.rotation.y = -angle;
+        // Position in semi-circle
+        const angle = (i - (cardData.length - 1) / 2) * 0.25;
+        const radius = 0.65;
+        card.position.x = Math.sin(angle) * radius;
+        card.position.y = 0;
+        card.position.z = -Math.cos(angle) * radius - 0.3;
         
-        // Add text to the card
-        await createCardText(card, data.title, data.description);
+        // Initially face the camera
+        card.lookAt(0, 0, 0);
         
-        // Store original position and rotation for animations
+        // Store original properties for animations
         card.userData = {
           originalPosition: card.position.clone(),
           originalRotation: card.rotation.clone(),
           originalScale: card.scale.clone(),
-          color: data.color,
-          distance: Infinity,
-          hoverAnimation: 0,
+          index: i,
+          hovered: false
         };
         
+        // Add to scene and cards array
         scene.add(card);
         cards.push(card);
-      }
-      
-      updateStatus('Cards created! Move your hand near them to interact.');
-    }
-
-    function setupHandTracking(session) {
-      // Create a visual representation of the hand position
-      const sphereGeometry = new THREE.SphereGeometry(0.02, 32, 32);
-      const sphereMaterial = new THREE.MeshPhongMaterial({
-        color: 0xFFFFFF,
-        transparent: true,
-        opacity: 0.7
-      });
-      handSphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-      handSphere.visible = false;
-      scene.add(handSphere);
-      
-      // Create a controller object for hand tracking
-      const inputSource = new THREE.Group();
-      scene.add(inputSource);
-      
-      // Create hand object
-      hand = new THREE.Group();
-      scene.add(hand);
-    }
-
-    function updateHandPosition(frame, referenceSpace) {
-      // Check if hand tracking data is available
-      if (frame.getJointPose) {
-        const hands = frame.getHands ? frame.getHands() : [];
         
-        // Use the first available hand
-        if (hands && hands.length > 0) {
-          const handData = hands[0];
-          const indexFingerTip = handData.joints['index-finger-tip'];
-          
-          if (indexFingerTip) {
-            const pose = frame.getJointPose(indexFingerTip, referenceSpace);
-            
-            if (pose) {
-              // Update hand visual position
-              hand.position.set(
-                pose.transform.position.x,
-                pose.transform.position.y,
-                pose.transform.position.z
-              );
-              
-              // Make the hand sphere visible now that we have tracking
-              handSphere.visible = true;
-              handSphere.position.copy(hand.position);
-              
-              // Check for interactions with cards
-              updateCardInteractions();
-              
-              return true;
-            }
-          }
-        }
-      }
-      
-      return false;
-    }
-
-    function updateCardInteractions() {
-      // Calculate distance from hand to each card
-      for (let i = 0; i < cards.length; i++) {
-        const card = cards[i];
-        const distance = hand.position.distanceTo(card.position);
-        card.userData.distance = distance;
-        
-        // Update hover animation progress
-        const targetHover = distance < 0.25 ? 1 : 0;
-        card.userData.hoverAnimation = THREE.MathUtils.lerp(
-          card.userData.hoverAnimation,
-          targetHover,
-          0.1
-        );
-        
-        // Apply hover effects
-        const hoverAmount = card.userData.hoverAnimation;
-        
-        // Scale effect
-        const scale = 1 + 0.3 * hoverAmount;
-        card.scale.set(scale, scale, scale);
-        
-        // Position effect - move toward user
-        const originalPos = card.userData.originalPosition;
-        const moveDir = new THREE.Vector3().subVectors(hand.position, originalPos).normalize();
-        
-        card.position.copy(originalPos).add(
-          moveDir.multiplyScalar(0.1 * hoverAmount)
-        );
-        
-        // Rotation effect - follow hand slightly
-        if (hoverAmount > 0.1) {
-          // Calculate direction from card to hand
-          const lookDir = new THREE.Vector3().subVectors(hand.position, card.position);
-          
-          // Apply rotation based on hand position, but keep it subtle
-          const originalRot = card.userData.originalRotation;
-          const maxRotation = 0.2; // Maximum rotation in radians
-          
-          card.rotation.y = originalRot.y + lookDir.x * maxRotation * hoverAmount;
-          card.rotation.x = originalRot.x - lookDir.y * maxRotation * hoverAmount;
+        // Add text if font is loaded
+        if (font) {
+          addCardText(card, cardData[i]);
         } else {
-          // Return to original rotation
-          card.rotation.copy(card.userData.originalRotation);
+          // Check again in a moment if font is still loading
+          setTimeout(() => {
+            if (font) addCardText(card, cardData[i]);
+          }, 1000);
         }
-        
-        // Material effect - change emissive intensity
-        card.material.emissive.setHex(card.userData.color);
-        card.material.emissiveIntensity = 0.5 * hoverAmount;
       }
+      
+      updateStatus('Move your controller near a card to interact');
+    }
+    
+    function addCardText(card, data) {
+      // Title text
+      const titleGeometry = new TextGeometry(data.title, {
+        font: font,
+        size: 0.03,
+        height: 0.005
+      });
+      titleGeometry.computeBoundingBox();
+      const titleWidth = titleGeometry.boundingBox.max.x - titleGeometry.boundingBox.min.x;
+      
+      const titleMaterial = new THREE.MeshStandardMaterial({ color: 0xFFFFFF });
+      const titleMesh = new THREE.Mesh(titleGeometry, titleMaterial);
+      
+      // Center and position the title on top of the card
+      titleMesh.position.set(-titleWidth/2, 0.08, 0.011);
+      card.add(titleMesh);
+      
+      // Description text
+      const descGeometry = new TextGeometry(data.description, {
+        font: font,
+        size: 0.015,
+        height: 0.002
+      });
+      descGeometry.computeBoundingBox();
+      const descWidth = descGeometry.boundingBox.max.x - descGeometry.boundingBox.min.x;
+      
+      const descMaterial = new THREE.MeshStandardMaterial({ color: 0xFFFFFF });
+      const descMesh = new THREE.Mesh(descGeometry, descMaterial);
+      
+      // Center and position the description below the title
+      descMesh.position.set(-descWidth/2, 0.04, 0.011);
+      card.add(descMesh);
+    }
+
+    function setupController(session) {
+      // Create controller
+      controller = renderer.xr.getController(0);
+      controller.addEventListener('connected', (event) => {
+        const xrInputSource = event.data;
+        updateStatus(`Controller connected: ${xrInputSource.handedness}`);
+      });
+      
+      scene.add(controller);
+      
+      // Add a visual for the controller
+      const controllerGeometry = new THREE.CylinderGeometry(0.01, 0.02, 0.08, 16);
+      const controllerMaterial = new THREE.MeshStandardMaterial({
+        color: 0xFFFFFF,
+        roughness: 0.3,
+        metalness: 0.5
+      });
+      const controllerMesh = new THREE.Mesh(controllerGeometry, controllerMaterial);
+      controllerMesh.rotation.x = Math.PI / 2;
+      controller.add(controllerMesh);
     }
 
     function render(timestamp, frame) {
@@ -462,27 +391,85 @@
         const referenceSpace = renderer.xr.getReferenceSpace();
         const session = renderer.xr.getSession();
         
-        // Update hand position based on tracking
-        const handUpdated = updateHandPosition(frame, referenceSpace);
+        // Check if controller is close to any card
+        const controllerWorldPosition = new THREE.Vector3();
+        controller.getWorldPosition(controllerWorldPosition);
         
-        if (!handUpdated) {
-          // If hand tracking is not available, animate the cards slightly
-          const time = clock.getElapsedTime();
-          cards.forEach((card, i) => {
-            card.position.y = card.userData.originalPosition.y + Math.sin(time * 1.5 + i) * 0.01;
-            card.rotation.y = card.userData.originalRotation.y + Math.sin(time * 0.5 + i) * 0.03;
-          });
+        let closestCard = null;
+        let closestDistance = 0.3; // Max distance for hover effect
+        
+        // Reset all previously hovered cards
+        cards.forEach(card => {
+          if (card.userData.hovered) {
+            animateToOriginal(card);
+          }
+        });
+        
+        // Find the closest card to the controller
+        cards.forEach(card => {
+          const distance = controllerWorldPosition.distanceTo(card.position);
+          
+          if (distance < closestDistance) {
+            closestCard = card;
+            closestDistance = distance;
+          }
+        });
+        
+        // Apply hover effect to the closest card
+        if (closestCard) {
+          hoverCard(closestCard, controllerWorldPosition);
         }
+        
+        // Subtle card animations (gentle floating)
+        const time = clock.getElapsedTime();
+        cards.forEach((card, index) => {
+          if (!card.userData.hovered) {
+            card.position.y = card.userData.originalPosition.y + Math.sin(time * 0.5 + index) * 0.01;
+            card.rotation.y = card.userData.originalRotation.y + Math.sin(time * 0.3 + index) * 0.05;
+          }
+        });
       }
       
-      // Animate lights for atmosphere
-      const time = clock.getElapsedTime();
-      const lights = scene.children.filter(obj => obj instanceof THREE.PointLight);
-      lights.forEach((light, i) => {
-        light.intensity = 0.8 + Math.sin(time * 0.5 + i * Math.PI) * 0.2;
-      });
-      
       renderer.render(scene, camera);
+    }
+    
+    function hoverCard(card, controllerPosition) {
+      card.userData.hovered = true;
+      
+      // Scale up the card
+      card.scale.set(1.15, 1.15, 1.15);
+      
+      // Move card slightly toward the user
+      const direction = new THREE.Vector3().subVectors(
+        new THREE.Vector3(0, 0, 0), 
+        card.userData.originalPosition
+      ).normalize().multiplyScalar(0.05);
+      
+      card.position.copy(card.userData.originalPosition).add(direction);
+      
+      // Make card face toward controller with slight rotation
+      const lookAtPos = controllerPosition.clone();
+      card.lookAt(lookAtPos);
+      
+      // Enhance material emission for glow effect
+      card.material.emissive.setHex(cardData[card.userData.index].color);
+      card.material.emissiveIntensity = 0.3;
+    }
+    
+    function animateToOriginal(card) {
+      card.userData.hovered = false;
+      
+      // Reset scale
+      card.scale.copy(card.userData.originalScale);
+      
+      // Reset position
+      card.position.copy(card.userData.originalPosition);
+      
+      // Reset rotation
+      card.rotation.copy(card.userData.originalRotation);
+      
+      // Reset material
+      card.material.emissiveIntensity = 0;
     }
   </script>
 </body>
